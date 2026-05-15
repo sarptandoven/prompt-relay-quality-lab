@@ -188,6 +188,97 @@ def plan_chunk_stitch_ranges(chunks):
 
 
 
+def plan_chunk_handoffs(chunks, min_context_frames=8):
+    """Return seam diagnostics for adjacent long-form chunks.
+
+    Long videos need more than non-overlapping stitch ranges: each boundary should
+    have enough shared temporal context to compare/crossfade tail and head frames.
+    This helper is pure diagnostics. It validates the chunk order through
+    ``plan_chunk_stitch_ranges`` and then reports the overlap and context windows
+    around every seam so a scheduler can reject or flag weak handoffs before a
+    costly render.
+    """
+    stitched = plan_chunk_stitch_ranges(chunks)
+    if len(stitched) < 2:
+        return []
+
+    try:
+        min_context = int(min_context_frames)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("PromptRelay: min_context_frames must be an integer.") from exc
+    min_context = max(min_context, 0)
+
+    handoffs = []
+    for previous, current in zip(stitched, stitched[1:]):
+        seam = previous["keep_end"]
+        overlap_start = max(previous["start"], current["start"])
+        overlap_end = min(previous["end"], current["end"])
+        overlap_length = max(overlap_end - overlap_start, 0)
+
+        if overlap_length == 0:
+            status = "hard_cut"
+        elif overlap_length < min_context:
+            status = "short_overlap"
+        else:
+            status = "ok"
+
+        handoffs.append({
+            "prev_index": previous["index"],
+            "next_index": current["index"],
+            "seam_frame": seam,
+            "overlap_start": overlap_start,
+            "overlap_end": overlap_end,
+            "overlap_length": overlap_length,
+            "prev_context_start": max(previous["start"], seam - min_context),
+            "prev_context_end": min(previous["end"], seam),
+            "next_context_start": max(current["start"], seam),
+            "next_context_end": min(current["end"], seam + min_context),
+            "status": status,
+        })
+
+    return handoffs
+
+
+def format_chunk_handoff_diagnostics(handoffs, max_handoffs=8):
+    """Return a bounded, Comfy-log-friendly summary of long-form chunk seams."""
+    if not handoffs:
+        return "no chunk handoffs"
+
+    total = len(handoffs)
+    indexed_handoffs = list(enumerate(handoffs))
+    if max_handoffs and total > max_handoffs:
+        head_count = max_handoffs // 2
+        tail_count = max_handoffs - head_count
+        indexed_handoffs = indexed_handoffs[:head_count] + indexed_handoffs[-tail_count:]
+
+    parts = []
+    previous_idx = None
+    for idx, handoff in indexed_handoffs:
+        if previous_idx is not None and idx != previous_idx + 1:
+            parts.append(f"... {idx - previous_idx - 1} handoff(s) omitted ...")
+        parts.append(
+            "handoff{idx}: chunk{prev}->{next} seam={seam} overlap=[{overlap_start}:{overlap_end}] "
+            "overlap_len={overlap_len} prev_ctx=[{prev_ctx_start}:{prev_ctx_end}] "
+            "next_ctx=[{next_ctx_start}:{next_ctx_end}] status={status}".format(
+                idx=idx,
+                prev=handoff["prev_index"],
+                next=handoff["next_index"],
+                seam=handoff["seam_frame"],
+                overlap_start=handoff["overlap_start"],
+                overlap_end=handoff["overlap_end"],
+                overlap_len=handoff["overlap_length"],
+                prev_ctx_start=handoff["prev_context_start"],
+                prev_ctx_end=handoff["prev_context_end"],
+                next_ctx_start=handoff["next_context_start"],
+                next_ctx_end=handoff["next_context_end"],
+                status=handoff["status"],
+            )
+        )
+        previous_idx = idx
+    return "; ".join(parts)
+
+
+
 def build_temporal_cost(q_token_idx, Lq, Lk, device, dtype, tokens_per_frame):
     """Gaussian penalty matrix [Lq, Lk] for video cross-attention (integer frame indexing)."""
     offset = torch.zeros(Lq, Lk, device=device, dtype=dtype)

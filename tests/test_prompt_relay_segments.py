@@ -101,6 +101,64 @@ class PromptRelaySegmentMetadataTests(unittest.TestCase):
             ])
 
 
+    def test_chunk_handoffs_report_overlap_and_context_windows(self):
+        plan = self.prompt_relay.plan_temporal_chunks(
+            latent_frames=2501,
+            tokens_per_frame=4096,
+            text_tokens=128,
+            max_mask_elements=self.prompt_relay.DEFAULT_MAX_MASK_ELEMENTS,
+            overlap_frames=16,
+            safety_margin=1.0,
+        )
+
+        handoffs = self.prompt_relay.plan_chunk_handoffs(plan["chunks"], min_context_frames=8)
+
+        self.assertEqual(handoffs, [{
+            "prev_index": 0,
+            "next_index": 1,
+            "seam_frame": 2040,
+            "overlap_start": 2032,
+            "overlap_end": 2048,
+            "overlap_length": 16,
+            "prev_context_start": 2032,
+            "prev_context_end": 2040,
+            "next_context_start": 2040,
+            "next_context_end": 2048,
+            "status": "ok",
+        }])
+
+    def test_chunk_handoffs_flag_weak_boundaries_before_render(self):
+        self.assertEqual(
+            self.prompt_relay.plan_chunk_handoffs([
+                {"start": 0, "end": 10},
+                {"start": 10, "end": 20},
+            ])[0]["status"],
+            "hard_cut",
+        )
+        self.assertEqual(
+            self.prompt_relay.plan_chunk_handoffs([
+                {"start": 0, "end": 10},
+                {"start": 8, "end": 18},
+            ], min_context_frames=4)[0]["status"],
+            "short_overlap",
+        )
+
+    def test_chunk_handoff_diagnostics_are_bounded_and_show_problem_seams(self):
+        chunks = []
+        start = 0
+        for _idx in range(14):
+            chunks.append({"start": start, "end": start + 20})
+            start += 18
+        handoffs = self.prompt_relay.plan_chunk_handoffs(chunks, min_context_frames=4)
+
+        summary = self.prompt_relay.format_chunk_handoff_diagnostics(handoffs, max_handoffs=6)
+
+        self.assertIn("handoff0: chunk0->1 seam=19 overlap=[18:20]", summary)
+        self.assertIn("status=short_overlap", summary)
+        self.assertIn("... 7 handoff(s) omitted ...", summary)
+        self.assertIn("handoff12: chunk12->13", summary)
+        self.assertLess(len(summary), 1200)
+
 
 if __name__ == "__main__":
     unittest.main()
