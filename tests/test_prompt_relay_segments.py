@@ -67,6 +67,15 @@ class PromptRelaySegmentMetadataTests(unittest.TestCase):
         self.assertEqual(plan["chunks"], [{"start": 0, "end": 10000, "length": 10000}])
         self.assertEqual(plan["overlap_frames"], 0)
 
+    def test_chunk_planner_rejects_when_one_frame_exceeds_budget(self):
+        with self.assertRaisesRegex(ValueError, "one latent frame would exceed the mask budget"):
+            self.prompt_relay.plan_temporal_chunks(
+                latent_frames=2501,
+                tokens_per_frame=4096,
+                text_tokens=128,
+                max_mask_elements=100_000,
+            )
+
     def test_chunk_stitch_ranges_split_overlap_into_non_overlapping_kept_frames(self):
         stitched = self.prompt_relay.plan_chunk_stitch_ranges([
             {"start": 0, "end": 10, "length": 10},

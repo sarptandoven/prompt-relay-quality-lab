@@ -81,6 +81,12 @@ def estimate_max_chunk_frames(tokens_per_frame, text_tokens, max_mask_elements=N
 
     budget = max(1, int(max_mask_elements * min(safety_margin, 1.0)))
     elements_per_frame = tokens_per_frame * text_tokens
+    if elements_per_frame > budget:
+        raise ValueError(
+            "PromptRelay: even one latent frame would exceed the mask budget "
+            f"({elements_per_frame:,} elements/frame > {budget:,} budgeted elements). "
+            "Reduce tokens_per_frame/text_tokens, raise PROMPT_RELAY_MAX_MASK_ELEMENTS, or disable the cap only after VRAM budgeting."
+        )
     return max(1, budget // elements_per_frame)
 
 
