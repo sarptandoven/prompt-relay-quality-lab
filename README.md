@@ -21,7 +21,7 @@ The repo is usable as a local ComfyUI custom node checkout. The deterministic lo
 python3 -m unittest discover -s tests -v
 ```
 
-Latest local result: 97 tests passing.
+Latest local result: 174 tests passing.
 
 Installed nodes:
 

@@ -62,4 +62,4 @@ Run:
 python3 -m unittest discover -s tests -v
 ```
 
-Latest local result: 97 tests OK.
+Latest local result: 161 tests OK.

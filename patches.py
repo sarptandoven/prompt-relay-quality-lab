@@ -1,6 +1,10 @@
+import logging
 import types
 import torch
 import comfy.ldm.modules.attention
+
+
+log = logging.getLogger(__name__)
 
 
 def _masked_attention(q, k, v, heads, mask, transformer_options={}, **kwargs):
@@ -131,17 +135,91 @@ def detect_model_type(model):
     )
 
 
+def _describe_patch(value):
+    patch_type = type(value).__name__
+    try:
+        text = repr(value)
+    except Exception:
+        text = "<unrepresentable>"
+    if len(text) > 160:
+        text = text[:157] + "..."
+    return f"{patch_type}: {text}"
+
+
+def _find_conflicting_object_patches(model_clone, key):
+    """Return object patches that target the same attention module/forward path.
+
+    Comfy object patches are path-based. Other nodes may patch the exact
+    ``*.forward`` method, the parent attention module, or a child under that
+    module. Any of those would make Prompt Relay's LTX/Wan cross-attention mask
+    order ambiguous, so fail early with a specific report instead of silently
+    losing masks in SageAttention/preview/custom-node stacks.
+    """
+    object_patches = getattr(model_clone, "object_patches", {}) or {}
+    target_module = key.rsplit(".", 1)[0]
+    conflicts = []
+    for existing_key, value in object_patches.items():
+        if (
+            existing_key == key
+            or existing_key == target_module
+            or existing_key.startswith(key + ".")
+            or key.startswith(existing_key + ".")
+            or existing_key.startswith(target_module + ".")
+            or target_module.startswith(existing_key + ".")
+        ):
+            conflicts.append((existing_key, value))
+    return conflicts
+
+
 def _check_unpatched(model_clone, key):
-    if key in getattr(model_clone, "object_patches", {}):
-        raise RuntimeError(
-            f"PromptRelay: cross-attention forward at '{key}' is already patched by "
-            "another node (e.g. KJNodes NAG). Stacking is not supported — remove the "
-            "conflicting node."
-        )
+    conflicts = _find_conflicting_object_patches(model_clone, key)
+    if not conflicts:
+        return
+
+    details = "; ".join(
+        f"{existing_key} ({_describe_patch(value)})"
+        for existing_key, value in conflicts[:5]
+    )
+    if len(conflicts) > 5:
+        details += f"; ... {len(conflicts) - 5} more"
+
+    raise RuntimeError(
+        f"PromptRelay: cannot patch cross-attention forward at '{key}' because "
+        f"object_patches already contains conflicting patch(es): {details}. "
+        "Prompt Relay must own these attention forward methods so its temporal "
+        "mask reaches the backend. Remove/reorder conflicting attention patch "
+        "nodes such as SageAttention, preview, NAG, or other custom attention "
+        "patchers for this model path."
+    )
+
+
+def _ensure_patches_installed(arch, patched_keys):
+    if patched_keys:
+        return
+    raise RuntimeError(
+        f"PromptRelay: detected a supported {arch} model but did not find any "
+        "cross-attention modules to patch. This model variant is not covered by "
+        "the current Prompt Relay patcher, so running would silently produce "
+        "unrelayed output. Update Prompt Relay for this model's attention module "
+        "names before using this node."
+    )
+
+
+def _log_patch_install(arch, patched_keys, mask_fn):
+    _ensure_patches_installed(arch, patched_keys)
+    diagnostics = getattr(mask_fn, "prompt_relay_diagnostics", None)
+    log.info(
+        "[PromptRelay] Installed %d %s attention patches: %s%s",
+        len(patched_keys),
+        arch,
+        ", ".join(patched_keys[:6]) + (" ..." if len(patched_keys) > 6 else ""),
+        " | diagnostics enabled" if diagnostics is not None else "",
+    )
 
 
 def apply_patches(model_clone, arch, mask_fn):
     diffusion_model = model_clone.get_model_object("diffusion_model")
+    patched_keys = []
 
     if arch == "wan":
         from comfy.ldm.wan.model import WanI2VCrossAttention
@@ -151,7 +229,9 @@ def apply_patches(model_clone, arch, mask_fn):
             cross_attn = block.cross_attn
             impl = _wan_i2v_forward if isinstance(cross_attn, WanI2VCrossAttention) else _wan_t2v_forward
             model_clone.add_object_patch(key, _CrossAttnPatch(impl, mask_fn).__get__(cross_attn, cross_attn.__class__))
-        return
+            patched_keys.append(key)
+        _log_patch_install(arch, patched_keys, mask_fn)
+        return patched_keys
 
     if arch == "ltx":
         for idx, block in enumerate(diffusion_model.transformer_blocks):
@@ -162,6 +242,8 @@ def apply_patches(model_clone, arch, mask_fn):
                 key = f"diffusion_model.transformer_blocks.{idx}.{attr}.forward"
                 _check_unpatched(model_clone, key)
                 model_clone.add_object_patch(key, _CrossAttnPatch(_ltx_forward, mask_fn).__get__(module, module.__class__))
-        return
+                patched_keys.append(key)
+        _log_patch_install(arch, patched_keys, mask_fn)
+        return patched_keys
 
     raise ValueError(f"Unknown model arch: {arch}")

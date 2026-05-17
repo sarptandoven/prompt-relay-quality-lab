@@ -1,0 +1,567 @@
+Prompt Relay + Infinite Video Research Notes
+============================================
+
+Context
+-------
+This document summarizes the research and analysis around Prompt Relay for LTX 2.3 / Wan-style ComfyUI video workflows, with a focus on why quality breaks down during longer generation and how the system could be redesigned toward “infinite video,” meaning video generation where quality does not steadily degrade over time.
+
+The key conclusion is that Prompt Relay is useful, but it is not enough by itself. Prompt Relay helps route different prompt instructions to different time segments, but it does not provide permanent visual memory. For long or “infinite” video, the system needs chunked generation, persistent memory, visual verification, overlap, and regeneration.
+
+1. What Prompt Relay Actually Does
+----------------------------------
+Prompt Relay is best understood as a timed prompt-routing method.
+
+It uses:
+- A global prompt
+- Local prompts
+- Segment lengths
+- Cross-attention modification
+- A distance-based penalty so each local prompt affects its assigned time region more strongly
+
+The original Prompt Relay research and implementation target the problem where multi-event video prompts cause different visual concepts to bleed into one another. For example, if a long prompt describes several different events, the model may mix the actions, objects, or visual details from one event into another. Prompt Relay tries to reduce this by making each local prompt dominate only its intended segment.
+
+In ComfyUI implementations such as Kijai’s Prompt Relay nodes, the system distributes latent frames across prompt segments and patches the model’s attention so different local prompts apply at different temporal regions.
+
+Important distinction:
+Prompt Relay controls timing and prompt influence. It does not create persistent identity memory, object memory, scene memory, or quality correction.
+
+2. Why Quality Breaks Down Over Longer Generation
+-------------------------------------------------
+Prompt Relay can improve medium-length videos, but quality still breaks down as video length increases. The main reasons are below.
+
+2.1 Prompt Relay Routes Text, Not Visual State
+Prompt Relay changes how text conditioning is applied over time. It does not force the same face, product, clothing, lighting, room layout, or object geometry to persist.
+
+This means that even if the prompts are timed correctly, the model can still drift visually.
+
+Common failures:
+- Face changes over time
+- Product shape slowly morphs
+- Clothing details shift
+- Background geometry changes
+- Lighting becomes inconsistent
+- Hands and object interactions degrade
+
+2.2 More Segments Create More Boundary Failures
+Longer videos require more prompt segments. Each boundary between segments is a possible failure point.
+
+Even with a soft transition, the model has to reconcile:
+- Previous visual structure
+- New local prompt instructions
+- The global prompt
+- Current noise/latent state
+- Self-attention memory
+- Cross-attention changes
+
+Over many boundaries, small inconsistencies compound.
+
+2.3 Small Segments Become Brittle in Latent Space
+In LTX/Wan-style workflows, the prompt segments usually map onto latent frames, not literal final video frames.
+
+If you create a long video with many prompt beats, each segment may get only a small latent window. That causes:
+- Rushed action
+- Cramped transitions
+- Less time for motion to stabilize
+- More visual instability
+- Actions completing too early
+- Filler motion or hallucinated movement
+
+2.4 Local Prompts Can Override the Global Anchor
+A strong global prompt is supposed to preserve persistent details. The local prompts should mostly describe only what changes.
+
+Bad long-video pattern:
+Scene 1: A woman in a red jacket holds a silver ring.
+Scene 2: The woman in a stylish crimson jacket shows the shiny diamond ring.
+Scene 3: The beautiful woman in a red coat places the sparkling ring down.
+
+This creates drift because the model sees slightly different character, object, and clothing descriptions in every segment.
+
+Better pattern:
+Global prompt:
+A single continuous realistic shot of the same woman, same face, same red jacket, same silver ring, same room, same lighting, same camera style.
+
+Scene 1:
+Static establishing view. No motion.
+
+Scene 2:
+She slowly raises the ring toward the camera.
+
+Scene 3:
+She rotates her wrist slightly so the ring catches the light.
+
+Scene 4:
+She lowers her hand back to the table.
+
+The local prompts should describe motion deltas, not re-describe the whole subject.
+
+2.5 LTX 2.3 Needs Enough Detail to Fill the Duration
+Longer videos need enough prompt detail to fill the duration. If the prompt is too short for the target length, the model may complete the described action too early and then invent filler motion.
+
+With Prompt Relay, this is amplified when segments are vague or too short.
+
+2.6 Visual Quality Is Still Bounded by the Base Model
+Prompt Relay does not retrain LTX 2.3, increase its context length, or add true long-range visual memory.
+
+It can improve:
+- Action timing
+- Multi-prompt ordering
+- Segment-level control
+- Prompt adherence
+
+It cannot fully solve:
+- Identity drift
+- Product morphing
+- Face degradation
+- Hand/object instability
+- Long-range layout consistency
+- Accumulated artifacts
+
+2.7 Other Attention Nodes Can Fight Prompt Relay
+In ComfyUI, Prompt Relay may conflict with other nodes that also modify or compete for cross-attention.
+
+Examples:
+- NAG-style attention guidance
+- Multi-image injection
+- Image conditioning nodes
+- IPAdapter-style reference influence
+- Regional conditioning
+- Other attention patchers
+
+If multiple systems are trying to control cross-attention at the same time, timing or visual consistency can break down.
+
+3. Main Verdict on Prompt Relay
+-------------------------------
+Prompt Relay is useful for:
+- Controlled 8–15 second clips
+- Multi-beat action timing
+- Reducing prompt concept bleed
+- Sequencing local actions
+- Making one generation follow a timeline better
+
+Prompt Relay is not enough for:
+- True long video
+- “Infinite” generation
+- Permanent identity preservation
+- Product consistency over many chunks
+- Fully stable faces, hands, and backgrounds
+
+The practical conclusion:
+Prompt Relay should be the timing layer, not the full long-video system.
+
+4. What “Infinite Video” Should Mean
+------------------------------------
+“Infinite video” should not mean generating one giant video in a single model pass.
+
+Instead, it should mean:
+A closed-loop chunk system where quality does not degrade because each new segment is re-grounded, scored, repaired, and only then accepted into memory.
+
+The goal is not to make a single generation last forever. The goal is to make a generation loop where bad frames are not allowed to become the next anchor.
+
+Core formula:
+Infinite video = short chunks + Prompt Relay timing + persistent visual memory + overlap + automatic rejection/regeneration
+
+5. The Correct Architecture
+---------------------------
+The proposed system:
+
+Script / user goal
+    ↓
+Global visual memory
+    ↓
+Prompt Relay segment plan
+    ↓
+Generate short chunk
+    ↓
+Score quality and consistency
+    ↓
+Accept, repair, or regenerate
+    ↓
+Update clean memory only
+    ↓
+Generate next chunk forever
+
+This turns Prompt Relay from a single-pass prompt timing trick into a closed-loop video generation system.
+
+6. Do Not Make One Long Generation
+----------------------------------
+For LTX 2.3, the safer method is to generate short chunks.
+
+Recommended chunk size:
+- 4–8 seconds each
+- 1–2 seconds of overlap
+- Multiple candidates per chunk if quality matters
+
+Each chunk should receive:
+1. The unchanged global prompt
+2. The current local Prompt Relay segment
+3. The first canonical reference frame
+4. The last accepted clean keyframe
+5. A few clean memory frames from earlier
+6. Optional object, product, or face crops
+7. A transition overlap from the previous chunk
+
+The system should not blindly feed every previous generated frame into the next chunk. That compounds errors.
+
+7. Clean Memory, Not Full Memory
+--------------------------------
+A long-video system should maintain a visual state bank outside the model.
+
+The memory system should store:
+- First canonical frame
+- Last clean frame
+- Best frame every 5–10 seconds
+- Face crop or product crop
+- Mask/box of important objects
+- Scene summary
+- Camera state
+- Rejected bad frames for debugging only
+
+The critical rule:
+Only clean, verified frames should become future anchors.
+
+Bad frames should never enter the memory bank.
+
+8. What the Memory System Should Track
+--------------------------------------
+Memory item: First canonical frame
+Purpose: Permanent identity/style anchor
+
+Memory item: Last clean frame
+Purpose: Immediate continuity
+
+Memory item: Best frame every 5–10 seconds
+Purpose: Long-range scene memory
+
+Memory item: Face crop or product crop
+Purpose: Identity/object preservation
+
+Memory item: Mask/box of important objects
+Purpose: Prevent object morphing or disappearance
+
+Memory item: Scene summary
+Purpose: Text state of what changed
+
+Memory item: Camera state
+Purpose: Direction, framing, lens, motion
+
+Memory item: Rejected bad frames
+Purpose: Debugging only, never used as anchors
+
+9. Prompt Relay’s Role in the Infinite System
+---------------------------------------------
+Prompt Relay should only handle timing and local action sequencing.
+
+The global prompt should remain stable and unchanged:
+- Same subject
+- Same face
+- Same product
+- Same clothing
+- Same room
+- Same lighting
+- Same camera style
+- Same realism/quality tags
+
+The local prompts should describe only:
+- Motion changes
+- Camera movement
+- Object interaction
+- Emotional/action beat
+- New event timing
+
+They should not repeatedly re-describe persistent details.
+
+10. Add a Quality Gate After Every Chunk
+----------------------------------------
+This is the most important part of making the system “infinite.”
+
+Every chunk should be generated, scored, and either:
+- Accepted
+- Repaired
+- Regenerated
+- Rejected
+
+Suggested automatic checks:
+- Face embedding similarity
+- CLIP/DINO similarity to reference
+- Product crop similarity
+- Object mask/box tracking
+- Optical flow smoothness
+- Depth/camera consistency
+- Text-video alignment
+- Sharpness/aesthetic score
+- Flicker score
+- Transition score across overlap
+- Scene layout consistency
+
+What these checks prevent:
+- Face drift
+- Product morphing
+- Object disappearance
+- Motion jumps
+- Flicker
+- Wrong action timing
+- Geometry collapse
+- Gradual detail decay
+
+The system becomes “infinite” by refusing to append low-quality chunks.
+
+11. Use Candidate Generation
+----------------------------
+For each chunk, generate multiple candidates.
+
+Example:
+- Generate 3–8 candidate chunks
+- Score each candidate
+- Pick the best one
+- If no candidate passes, revise prompt/conditioning and regenerate
+
+This is similar to inference-time search. It is not just sampling once and hoping the result works.
+
+12. Use Overlap Instead of Hard Continuation
+--------------------------------------------
+Do not start each new chunk directly after the previous one with no overlap.
+
+Better:
+Previous chunk: frames 000–120
+Next chunk:     frames 096–216
+Overlap:        frames 096–120
+
+The overlap allows smoother continuation.
+
+The system can:
+- Blend the overlap
+- Select the better transition
+- Use the previous accepted frames as conditioning
+- Reject the new chunk if the overlap does not match
+
+13. Add Noise and Latent Continuity
+-----------------------------------
+For LTX/ComfyUI, image/frame continuity is not enough. The system should also preserve latent and noise continuity.
+
+Useful ideas:
+1. Noise rescheduling
+   Reuse or correlate noise patterns across chunks so each chunk does not restart from totally unrelated randomness.
+
+2. Global/local feature fusion
+   Use global low-frequency structure for identity, color, layout, and scene continuity. Use local high-frequency detail for motion and texture.
+
+3. Memory-compressed attention
+   Instead of passing every old frame, compress visual history into a smaller representation that the model can use without exploding compute cost.
+
+14. Research Directions That Inspired the Architecture
+------------------------------------------------------
+The following long-video research directions are relevant:
+
+Prompt Relay
+- Useful for timed multi-prompt routing.
+- Helps with event sequencing and prompt interference.
+- Does not solve long-range identity or object memory by itself.
+
+Video-Infinity
+- Uses local context frames plus global context frames for long-form video generation.
+- Relevant because infinite video needs both recent context and long-range memory.
+
+FreeNoise
+- Uses noise rescheduling ideas to support longer video generation.
+- Relevant because restarting each chunk from unrelated noise can cause instability.
+
+FreeLong / FreeLong++
+- Targets long-video degradation through global/local frequency ideas.
+- Relevant because long videos need stable low-frequency structure plus local high-frequency detail.
+
+MAG / memory-compressed approaches
+- Treat long video as a memory problem.
+- Relevant because full history is too expensive, but short windows forget too much.
+
+StableWorld-style clean-frame selection
+- Relevant because degraded frames should not be fed back into future generation.
+- The system should preserve clean/geometrically consistent frames and discard bad ones.
+
+15. Build Plan
+--------------
+A practical implementation can be staged.
+
+V0: No Model Training, Buildable Now
+------------------------------------
+Use:
+- LTX 2.3
+- ComfyUI
+- Prompt Relay
+- Chunked generation
+- 1–2 second overlap
+- First-frame anchor
+- Last-clean-frame anchor
+- Product/face crop anchors
+- VLM prompt/state updater
+- Automatic quality scorer
+- Regenerate-until-pass loop
+
+This would already outperform raw long Prompt Relay for many controlled video types.
+
+V1: Stronger ComfyUI Implementation
+-----------------------------------
+Add:
+- Noise continuity
+- Latent overlap
+- Clean keyframe bank
+- Dynamic frame eviction
+- Multi-seed candidate generation
+- Transition repair
+- Periodic re-anchoring shots
+- Object masks
+- Product/face crop consistency scoring
+
+This version could feel “infinite” for:
+- UGC ads
+- Product demos
+- Talking product videos
+- Room scenes
+- Controlled character shots
+- Simple storytelling scenes
+
+V2: Research-Grade Infinite Video
+---------------------------------
+Train or patch:
+- Memory adapter
+- KV-cache style visual memory
+- Identity/object consistency loss
+- Long-horizon critic
+- Frame eviction model
+- Self-repair model
+- Transition correction model
+
+At this point, the system becomes closer to a lightweight world model than a normal video generator.
+
+16. Most Important Design Rule
+------------------------------
+Do not let the generated video be the only source of truth.
+
+The source of truth should be:
+- Canonical reference image
+- Global prompt
+- Clean memory bank
+- Object/identity embeddings
+- Verified accepted frames
+
+The generated video is only the current output. It should not automatically become memory.
+
+17. Why Infinite Quality Requires a Closed Loop
+-----------------------------------------------
+If the system is open-loop, every chunk inherits some errors from the previous chunk. Those errors accumulate.
+
+Open-loop system:
+Generate → append → generate → append → generate → append
+
+Problem:
+Bad frames become future conditioning.
+
+Closed-loop system:
+Generate → score → repair/regenerate → accept only if clean → update memory → generate next
+
+Benefit:
+Bad chunks do not poison the future.
+
+18. Recommended Practical Setup for LTX 2.3
+-------------------------------------------
+For a first working prototype:
+
+Chunking:
+- 4–8 seconds per chunk
+- 1–2 seconds of overlap
+- 3–5 candidates per chunk
+
+Prompting:
+- One stable global prompt
+- Local prompts describe only motion/action deltas
+- No repeated re-description of persistent subjects
+
+Conditioning:
+- First canonical frame
+- Last accepted clean frame
+- One clean memory frame every 5–10 seconds
+- Face/product crops if relevant
+- Optional segmentation masks
+
+Scoring:
+- CLIP/DINO similarity
+- Face/object similarity
+- Optical flow
+- Flicker
+- Sharpness
+- Transition consistency
+- Text-action alignment
+
+Regeneration:
+- If identity score drops, increase reference conditioning
+- If motion is wrong, revise local prompt
+- If transition breaks, increase overlap or regenerate
+- If product morphs, use crop/mask anchor
+- If scene drifts, re-anchor with canonical frame
+
+19. Best Use Cases
+------------------
+This approach is most realistic for:
+- UGC product ads
+- Product demonstrations
+- Social media clips
+- Controlled talking-head scenes
+- Character-in-room scenes
+- Repeatable camera motions
+- Short narrative loops
+- Video ads stitched from many micro-actions
+
+It is less realistic for:
+- Completely unrestricted cinema scenes
+- Complex multi-character scenes
+- Long action sequences
+- Rapid camera movement
+- Highly detailed hands interacting with small objects
+- Scenes where every frame introduces new geometry
+
+20. Final Verdict
+-----------------
+Prompt Relay should not be treated as the whole solution for infinite video.
+
+It should become one component inside a larger system:
+
+Prompt Relay = timing layer
+Memory bank = identity/object/scene persistence
+Overlap = transition stability
+Verifier = quality protection
+Regenerator = error correction
+Chunking = scalability
+
+The final formula:
+Infinite video ≈ short chunks + Prompt Relay timing + persistent visual memory + overlap + automatic rejection/regeneration
+
+Without a verifier/regenerator, quality will still decay.
+With a closed-loop memory and scoring system, the video can keep going because bad chunks are not allowed to become the next anchor.
+
+Sources / Research References
+-----------------------------
+Prompt Relay GitHub:
+https://github.com/GordonChen19/Prompt-Relay
+
+Kijai ComfyUI Prompt Relay:
+https://github.com/kijai/ComfyUI-PromptRelay
+
+Prompt Relay paper:
+https://arxiv.org/pdf/2604.10030
+
+LTX 2.3 prompt guide:
+https://ltx.io/model/model-blog/ltx-2-3-prompt-guide
+
+Video-Infinity:
+https://github.com/Yuanshi9815/Video-Infinity
+
+FreeNoise:
+https://github.com/AILab-CVC/FreeNoise
+
+FreeLong:
+https://github.com/aniki-ly/FreeLong
+
+MAG / memory-style long video generation reference:
+https://arxiv.org/html/2512.18741v1
+
+StableWorld-style clean memory / stable frame reference:
+https://arxiv.org/html/2601.15281v1

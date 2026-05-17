@@ -229,7 +229,7 @@ cd /Users/sarpdoven/.openclaw/workspace/prompt-relay-quality-lab
 python3 -m unittest discover -s tests -v
 ```
 
-Current local gate: 97 tests passing.
+Current local gate: 161 tests passing.
 
 For a file-only copy into another node pack, the minimum import/registration check is:
 

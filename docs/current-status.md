@@ -2,7 +2,7 @@
 
 _Last updated: 2026-05-15 PDT_
 
-This repo is currently usable as a local ComfyUI custom node checkout. The code-side goal is complete for the current pass: Prompt Relay behavior is testable, the main node has safer timing/options handling, the lab node is registered for A/B tests, and long-form ComfyUI usage is documented.
+This repo is currently usable as a local ComfyUI custom node checkout. The code-side goal is complete for the current pass: Prompt Relay behavior is testable, the main node has safer timing/options handling, the lab node is registered for A/B tests, and long-form ComfyUI usage is documented. The main Prompt Relay node can now receive long-form quality planning controls through `PromptRelayAdvancedOptions` and log a ComfyUI-visible chunk plan/preflight for 2500+ frame workflows.
 
 Do not claim final visual quality until Sarp runs controlled ComfyUI renders. The remaining validation is workflow/runtime visual validation, not deterministic unit-test coverage.
 
@@ -38,6 +38,23 @@ The local unittest suite currently covers these deterministic contracts:
   - Lab segment/sigma behavior is pinned against the main node for critical options, including non-positive segment skip behavior.
   - LTXV grid metadata parsing falls back safely when Comfy metadata is missing, truncated, non-numeric, or non-positive.
   - Empty relay segment metadata fails early with an actionable error instead of a cryptic `max()` failure.
+  - Long-form chunk planning can bound each `[query_tokens, text_tokens]` mask under the safety cap for 2500+ frame timelines.
+  - Chunk planning now fails early when even one latent frame would exceed the configured mask budget.
+  - Chunk stitch range planning splits overlaps into deterministic non-overlapping kept frames and rejects gapped plans.
+  - Chunk handoff diagnostics flag hard cuts or too-short overlaps before expensive long-form renders.
+  - Chunk plan diagnostics summarize budget, overlap, stitch coverage, and worst seam status in bounded Comfy-friendly logs.
+  - Chunk prompt windows clip global prompt beats to chunk-local segment lengths for bounded long-form rendering.
+  - Chunk prompt schedules can page global prompt beats onto each resumable long-form chunk without materializing every window.
+  - Quality-oriented chunk planning can prefer 129-257 frame windows while still honoring the hard mask budget.
+  - The main ComfyUI encoder path can trigger quality chunk planning from connected advanced options without changing default behavior.
+  - Long-form plan budget estimates include one conservative token of special-token slack so EOS/BOS bookkeeping does not understate mask size at the cap.
+  - Chunk handoff summaries are bounded for long 2500+ frame Comfy logs.
+  - Chunk plan evaluation now preflights mask budget, stitch coverage, handoff risk, and continuity carry before expensive renders.
+  - Resumable page diagnostics include carry-in seam status so infinite runners can distinguish local page safety from cross-page continuity risk.
+  - Chunk memory anchors select bounded clean stitched frames for closed-loop long-form conditioning.
+  - Prompt seam diagnostics flag chunk stitch seams that land on or near authored prompt transitions.
+  - Prompt-safe stitch shifts can now drive crossfade seam metadata, keeping blend diagnostics aligned with shifted seams.
+  - Metric-agnostic quality gate helpers can rank chunk candidates, accept only passing chunks, and return rejected retry cursors so failed candidates do not become future memory.
   - Package registration exposes the lab node without replacing existing baseline nodes.
 
 Run the suite with:
@@ -46,7 +63,12 @@ Run the suite with:
 python3 -m unittest discover -s tests -v
 ```
 
-Known latest local result: 97 tests passing on 2026-05-15 PDT.
+Known latest local result: 174 tests passing on 2026-05-16 PDT.
+
+New helpers added in the current working tree:
+
+- `build_quality_chunk_render_manifest(step)` creates a scheduler-facing payload from a safe quality chunk stream step. It exposes the render decision, chunk input ranges, output append range, prompt windows, conditioning anchors, crossfade windows, sanitized checkpoint state, progress counters, and bounded diagnostics. This is intended as the handoff contract for a future ComfyUI queue runner, not a visual-quality claim.
+- `build_quality_chunk_queue_plan(manifest)` turns that page-level manifest into per-chunk queue items with input ranges, keep/trim ranges, prompt windows, conditioning anchors, crossfade windows, and checkpoint state. It gives the future runner an explicit render/skip contract without depending on ComfyUI internals yet.
 
 ## Current working-tree status
 
