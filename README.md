@@ -1,10 +1,6 @@
 # ComfyUI Prompt-Relay
 
-Prompt Relay custom node workbench for ComfyUI, with LTX 2.3 AV attention-routing hardening, parser/timeline robustness, advanced tuning options, and a supplemental lab node for controlled A/B tests.
-
-Custom node quickstart: [docs/custom-node-quickstart.md](docs/custom-node-quickstart.md)
-
-Drop-in supplemental node: [`prompt_relay_lab_node.py`](prompt_relay_lab_node.py). Notes: [docs/drop-in-node.md](docs/drop-in-node.md). Exact install and run instructions: [docs/custom-node-quickstart.md](docs/custom-node-quickstart.md)
+WORK IN PROGRESS
 
 <img width="1486" height="1022" alt="image" src="./assets/timeline_node.png" />
 
@@ -12,27 +8,6 @@ Drop-in supplemental node: [`prompt_relay_lab_node.py`](prompt_relay_lab_node.py
 Original project:
 
 https://gordonchen19.github.io/Prompt-Relay/
-
-## Current custom-node status
-
-The repo is usable as a local ComfyUI custom node checkout. The deterministic local gate is:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-Latest local result: 174 tests passing.
-
-Installed nodes:
-
-- `Prompt Relay Encode`
-- `Prompt Relay Encode (Timeline)`
-- `Prompt Relay Encode (Smart)`
-- `Prompt Relay Smart Encode Test`
-- `Prompt Relay Advanced Options`
-- `Prompt Relay Encode (Lab)`
-
-For LTX 2.3 AV long-form work, use chunked generation with Prompt Relay inside each chunk. Do not treat a single 2500+ frame latent run as the target integration path.
 
 ---
 
