@@ -14,3 +14,7 @@ this repo experiments with cleaner prompt structure, stronger scene-to-scene con
 ## status
 
 work in progress. this repository is for testing, modifying, and improving the prompt-relay node pack.
+
+## tools
+
+- `python tools/prompt_relay_preview.py "scene one | scene two" --latent-frames 16` previews smart prompt parsing and encoded segment lengths without loading comfyui or touching the custom node runtime.
